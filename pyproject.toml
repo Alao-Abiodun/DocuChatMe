@@ -1,0 +1,2 @@
+[tool.prisma]
+seed = "python seed.py"
