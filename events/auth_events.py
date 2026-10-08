@@ -1,5 +1,5 @@
 from lib.events_lib import app_events
-from lib.prisma_lib import prisma
+from repositories import conversation_repository, usage_log_repository
 
 AUTH_EVENTS = {
     "USER_REGISTERED": "auth:user-registered",
@@ -9,12 +9,11 @@ AUTH_EVENTS = {
     "LOGIN_FAILED": "auth:login-failed",
 }
 
+
 @app_events.on(AUTH_EVENTS["USER_REGISTERED"])
 async def log_signup(user: dict):
     try:
-        await prisma.usagelog.create(
-            data={"userId": user["id"], "action": "signup", "tokens": 0, "costUsd": 0}
-        )
+        await usage_log_repository.create(user["id"], action="signup")
     except Exception as error:
         print(f"Failed to log signup: {error}")
 
@@ -22,9 +21,7 @@ async def log_signup(user: dict):
 @app_events.on(AUTH_EVENTS["USER_REGISTERED"])
 async def create_welcome_conversation(user: dict):
     try:
-        await prisma.conversation.create(
-            data={"userId": user["id"], "title": "Welcome to DocuChat"}
-        )
+        await conversation_repository.create(user["id"], "Welcome to DocuChat")
     except Exception as error:
         print(f"Failed to create welcome conversation: {error}")
 
@@ -32,9 +29,7 @@ async def create_welcome_conversation(user: dict):
 @app_events.on(AUTH_EVENTS["USER_LOGGED_IN"])
 async def log_login(data: dict):
     try:
-        await prisma.usagelog.create(
-            data={"userId": data["userId"], "action": "login", "tokens": 0, "costUsd": 0}
-        )
+        await usage_log_repository.create(data["userId"], action="login")
     except Exception as error:
         print(f"Failed to log login: {error}")
 

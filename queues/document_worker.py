@@ -4,10 +4,11 @@ from bullmq import Job, Worker
 
 from lib.chunker_lib import estimate_tokens, split_into_chunks
 from lib.events_lib import app_events
-from lib.prisma_lib import prisma
+from lib.transaction_lib import transaction
 from queues.connection_queue import REDIS_URL
 from queues.dead_letter_queue import dead_letter_queue
 from queues.document_queue import MAX_ATTEMPTS
+from repositories import document_repository
 
 
 async def process_document(job: Job, token: str) -> dict:
@@ -17,16 +18,13 @@ async def process_document(job: Job, token: str) -> dict:
 
     # Change 1: a missing or deleted document is a PERMANENT failure.
     # Retrying won't fix it, so finish the job quietly.
-    doc = await prisma.document.find_unique(where={"id": document_id})
+    doc = await document_repository.find_by_id(document_id)
     if not doc or doc.deletedAt:
         print(f"Document {document_id} not found or deleted, skipping")
         return {"success": False, "skipped": True}
 
     try:
-        await prisma.document.update(
-            where={"id": document_id},
-            data={"status": "processing"},
-        )
+        await document_repository.update(document_id, {"status": "processing"})
         await job.updateProgress(10)
 
         # Split into chunks
@@ -34,12 +32,12 @@ async def process_document(job: Job, token: str) -> dict:
         await job.updateProgress(40)
 
         # Store chunks + mark ready, all-or-nothing
-        async with prisma.tx() as tx:
+        async with transaction() as tx:
             # Idempotent: wipe chunks from any previous attempt first
-            await tx.chunk.delete_many(where={"documentId": document_id})
+            await document_repository.delete_chunks(document_id, client=tx)
 
-            await tx.chunk.create_many(
-                data=[
+            await document_repository.create_chunks(
+                [
                     {
                         "documentId": document_id,
                         "index": index,
@@ -47,12 +45,14 @@ async def process_document(job: Job, token: str) -> dict:
                         "tokenCount": estimate_tokens(text),
                     }
                     for index, text in enumerate(chunks)
-                ]
+                ],
+                client=tx,
             )
 
-            await tx.document.update(
-                where={"id": document_id},
-                data={"status": "ready", "chunkCount": len(chunks), "error": None},
+            await document_repository.update(
+                document_id,
+                {"status": "ready", "chunkCount": len(chunks), "error": None},
+                client=tx,
             )
 
         await job.updateProgress(100)
@@ -71,9 +71,9 @@ async def process_document(job: Job, token: str) -> dict:
         if is_last_attempt:
             # Change 2: mark failed AND move to the dead letter queue here,
             # instead of inside an async 'failed' event listener
-            await prisma.document.update(
-                where={"id": document_id},
-                data={"status": "failed", "error": str(error)},
+            await document_repository.update(
+                document_id,
+                {"status": "failed", "error": str(error)},
             )
             await dead_letter_queue.add("failed-document", {
                 "originalJobId": job.id,
