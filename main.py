@@ -13,11 +13,19 @@ from routes.conversation_routes import router as conversation_router
 from lib.errors_lib import AppError
 from lib.prisma_lib import prisma
 
+from queues.dead_letter_queue import dead_letter_queue
+from queues.document_queue import document_queue
+from queues.document_worker import create_document_worker
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await prisma.connect()
+    worker = create_document_worker()  # starts listening for jobs
     yield
+    await worker.close()               # finish current jobs, stop taking new ones
+    await document_queue.close()
+    await dead_letter_queue.close()
     await prisma.disconnect()
 
 

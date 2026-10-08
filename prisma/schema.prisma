@@ -106,6 +106,8 @@ model Document {
   deletedBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  content String?
+  error String?
 
   user     User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   chunks Chunk[]
@@ -118,11 +120,13 @@ model Chunk {
   id    String   @id @default(uuid())
   documentId String
   content String 
-  position    Int
+  index    Int
+  tokenCount Int @default(0)
   createdAt  DateTime @default(now())
 
   document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
+  @@unique([documentId, index])
   @@index([documentId])
 }
 
