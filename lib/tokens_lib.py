@@ -21,8 +21,8 @@ def generate_referesh_token(user) -> str:
     payload = {
         "sub": user.id,
         "role": user.role,
-        "type": "access",
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=15)
+        "type": "refresh",
+        "exp": datetime.now(timezone.utc) + timedelta(days=7)
     }
     return jwt.encode(payload, REFRESH_TOKEN_SECRET, algorithm="HS256")
 
