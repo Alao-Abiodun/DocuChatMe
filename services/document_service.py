@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+import re
 
 from lib.errors_lib import NotFoundError
 from lib.events_lib import app_events
@@ -49,18 +50,22 @@ async def get_document(document_id: str, user_id: str):
     return doc
 
 
-async def create_document(user_id: str, title: str, filename: str, file_size_bytes: int,
-                          description: str | None = None):
-    data = {
-        "userId": user_id,
-        "title": title,
-        "filename": filename,
-        "fileSizeBytes": file_size_bytes,
-    }
-    if description is not None:
-        data["description"] = description
+from queues.document_queue import queue_document_for_processing
 
-    doc = await prisma.document.create(data=data)
+
+async def create_document(user_id: str, title: str, content: str) -> dict:
+    doc = await prisma.document.create(
+        data={
+            "userId": user_id,
+            "title": title,
+            "filename": re.sub(r"\s+", "-", title.lower()),
+            "content": content,
+            "fileSizeBytes": len(content.encode("utf-8")),
+            "status": "pending",
+        }
+    )
+
+    job_id = await queue_document_for_processing(doc.id, user_id)
 
     app_events.emit(DOC_EVENTS["CREATED"], {
         "userId": user_id,
@@ -68,7 +73,8 @@ async def create_document(user_id: str, title: str, filename: str, file_size_byt
         "title": doc.title,
         "fileSizeBytes": doc.fileSizeBytes,
     })
-    return doc
+
+    return {"document": doc, "jobId": job_id}
 
 async def delete_document(document_id: str, user_id: str):
     doc = await prisma.document.find_unique(where={"id": document_id})
